@@ -47,6 +47,7 @@ import {
   listMcqs,
   listSubjectProgress,
   listChapterProgress,
+  listChapterPracticeAnswers,
   recordMcqPracticeProgress,
 } from "@/lib/learning.functions";
 import { useLevels } from "@/hooks/use-levels";
@@ -400,6 +401,7 @@ export function McqFlow() {
   const listMcqsFn = useServerFn(listMcqs);
   const listSubjectProgressFn = useServerFn(listSubjectProgress);
   const listChapterProgressFn = useServerFn(listChapterProgress);
+  const listChapterPracticeAnswersFn = useServerFn(listChapterPracticeAnswers);
   const recordPracticeProgressFn = useServerFn(recordMcqPracticeProgress);
   const saveAttemptFn = useServerFn(saveSessionAttempt);
   const toggleBookmarkFn = useServerFn(toggleMcqBookmark);
@@ -519,6 +521,13 @@ export function McqFlow() {
     queryKey: ["mcqs", chapterId],
     queryFn: () => listMcqsFn({ data: { chapterId: chapterId!, limit: 2000 } }),
     enabled: !!chapterId && step === 3,
+  });
+  const practiceAnswersQ = useQuery({
+    queryKey: ["chapter-practice-answers", chapterId],
+    queryFn: () => listChapterPracticeAnswersFn({ data: { chapterId: chapterId! } }),
+    enabled: !!chapterId && step === 3,
+    staleTime: 0,
+    refetchOnMount: true,
   });
 
   // Full chapter (all MCQs), optionally truncated by session config.
