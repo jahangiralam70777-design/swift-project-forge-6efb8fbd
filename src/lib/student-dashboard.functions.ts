@@ -225,19 +225,38 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       cursor.setUTCDate(cursor.getUTCDate() - 1);
     }
 
-    // Weekly bars (Mon..Sun accuracy of attempts that day, 0 if none)
+    // Weekly bars (7 daily accuracy buckets). Prefer the current 7-day window;
+    // if that has no submissions but the student has older submissions, anchor
+    // the same 7-bar chart to their latest submission day so historical users
+    // do not see a blank trend despite having real answer history.
     const today = new Date();
-    const bars: number[] = [];
-    const barTotals: number[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
-      d.setUTCDate(today.getUTCDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      const day = trendAnswers.filter((a) => (a.at ?? "").slice(0, 10) === key);
-      const t = day.length;
-      const c = day.filter((a) => a.is_correct).length;
-      bars.push(t ? Math.round((c / t) * 100) : 0);
-      barTotals.push(t);
+    const buildAccuracyBuckets = (anchor: Date) => {
+      const nextBars: number[] = [];
+      const nextTotals: number[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(anchor);
+        d.setUTCDate(anchor.getUTCDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        const day = trendAnswers.filter((a) => (a.at ?? "").slice(0, 10) === key);
+        const t = day.length;
+        const c = day.filter((a) => a.is_correct).length;
+        nextBars.push(t ? Math.round((c / t) * 100) : 0);
+        nextTotals.push(t);
+      }
+      return { bars: nextBars, barTotals: nextTotals };
+    };
+    const currentBuckets = buildAccuracyBuckets(today);
+    let bars = currentBuckets.bars;
+    let barTotals = currentBuckets.barTotals;
+    const todayAccuracy = bars[6] ?? 0;
+    const todaySubmissionTotal = barTotals[6] ?? 0;
+    if (!barTotals.some((t) => t > 0) && trendAnswers.length) {
+      const latest = trendAnswers.reduce((max, a) => Math.max(max, new Date(a.at).getTime()), 0);
+      if (latest > 0) {
+        const latestBuckets = buildAccuracyBuckets(new Date(latest));
+        bars = latestBuckets.bars;
+        barTotals = latestBuckets.barTotals;
+      }
     }
 
     // Continue learning: latest unique quizzes the user attempted but didn't finish 100%
@@ -329,6 +348,8 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       streak,
       bars,
       barTotals,
+      todayAccuracy,
+      todaySubmissionTotal,
       subjects: subjectsList,
       learning,
       recommendations,
