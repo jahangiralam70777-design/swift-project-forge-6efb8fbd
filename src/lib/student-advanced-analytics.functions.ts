@@ -44,14 +44,12 @@ export const studentAdvancedAnalytics = createServerFn({ method: "GET" })
     ]);
 
     const sessions = sessionsR.data ?? [];
-    const allAttempts = attemptsR.data ?? [];
-    const attempts = allAttempts.filter((a) => a.status === "completed");
+    const attempts = (attemptsR.data ?? []).filter((a) => a.status === "completed");
     const subjects = subjectsR.data ?? [];
     const chapters = chaptersR.data ?? [];
 
-    // Submitted MCQ answers drive solved/correct/wrong math.
-    // Include answers from BOTH completed and in-progress attempts so the
-    // Accuracy Trend updates as soon as a student submits a single question.
+    // Submitted MCQ answers are the only source for solved/correct/wrong math.
+    // Skip rows with chosen_option = NULL; those are unsubmitted/skipped questions.
     type SubmittedAnswer = {
       attempt_id: string | null;
       mcq_id: string;
@@ -61,15 +59,15 @@ export const studentAdvancedAnalytics = createServerFn({ method: "GET" })
       subject_id: string | null;
       chapter_id: string | null;
     };
-    const attemptById = new Map(allAttempts.map((a) => [a.id, a]));
+    const attemptById = new Map(attempts.map((a) => [a.id, a]));
     const submittedAnswers: SubmittedAnswer[] = [];
-    const nonPracticeIds = allAttempts.filter((a) => a.kind !== "mcq_practice").map((a) => a.id);
+    const nonPracticeIds = attempts.filter((a) => a.kind !== "mcq_practice").map((a) => a.id);
     for (let i = 0; i < nonPracticeIds.length; i += 200) {
       const ids = nonPracticeIds.slice(i, i + 200);
       if (!ids.length) continue;
       const { data: ans, error } = await supabase
         .from("attempt_answers")
-        .select("attempt_id,mcq_id,is_correct,chosen_option,created_at")
+        .select("attempt_id,mcq_id,is_correct,chosen_option")
         .in("attempt_id", ids)
         .not("chosen_option", "is", null);
       if (error) throw error;
@@ -80,7 +78,7 @@ export const studentAdvancedAnalytics = createServerFn({ method: "GET" })
           attempt_id: attempt.id,
           mcq_id: row.mcq_id,
           is_correct: row.is_correct,
-          at: row.created_at ?? attempt.completed_at ?? attempt.started_at,
+          at: attempt.completed_at ?? attempt.started_at,
           kind: attempt.kind,
           subject_id: attempt.subject_id ?? null,
           chapter_id: attempt.chapter_id ?? null,
@@ -105,6 +103,7 @@ export const studentAdvancedAnalytics = createServerFn({ method: "GET" })
         chapter_id: row.chapter_id ?? null,
       });
     }
+
 
     const mcqIds = Array.from(new Set(submittedAnswers.map((a) => a.mcq_id)));
     const mcqChapter = new Map<string, string | null>();
