@@ -102,9 +102,11 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
     const attempts = attemptsR.data ?? [];
     const completed = attempts.filter((a) => a.status === "completed");
 
-    // Submitted answers are the only source for solved/correct/wrong math.
-    // Skip placeholder unanswered rows and ignore MCQ Practice attempt rows here;
-    // Practice progress is counted from mcq_practice_progress for instant updates.
+    // Submitted answers drive solved/correct/wrong math and the Accuracy Trend.
+    // Include answers from BOTH completed and in-progress attempts so the trend
+    // updates as soon as a student submits a single question in Quiz / Mock /
+    // Custom Exam — they don't have to finish the session.
+    // MCQ Practice rows come from mcq_practice_progress below.
     type SubmittedAnswer = {
       mcq_id: string;
       attempt_id: string | null;
@@ -114,8 +116,8 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       subject_id: string | null;
     };
     const submittedAnswers: SubmittedAnswer[] = [];
-    const completedById = new Map(completed.map((a) => [a.id, a]));
-    const nonPracticeAttemptIds = completed
+    const attemptById = new Map(attempts.map((a) => [a.id, a]));
+    const nonPracticeAttemptIds = attempts
       .filter((a) => a.kind !== "mcq_practice")
       .map((a) => a.id);
     for (let i = 0; i < nonPracticeAttemptIds.length; i += 200) {
@@ -123,18 +125,18 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       if (!ids.length) continue;
       const { data: ans, error } = await supabase
         .from("attempt_answers")
-        .select("attempt_id,mcq_id,is_correct,chosen_option")
+        .select("attempt_id,mcq_id,is_correct,chosen_option,created_at")
         .in("attempt_id", ids)
         .not("chosen_option", "is", null);
       if (error) throw error;
       for (const row of ans ?? []) {
-        const attempt = completedById.get(row.attempt_id);
+        const attempt = attemptById.get(row.attempt_id);
         if (!attempt) continue;
         submittedAnswers.push({
           mcq_id: row.mcq_id,
           attempt_id: attempt.id,
           is_correct: row.is_correct,
-          at: attempt.completed_at ?? attempt.started_at ?? attempt.created_at,
+          at: row.created_at ?? attempt.completed_at ?? attempt.started_at ?? attempt.created_at,
           kind: attempt.kind,
           subject_id: attempt.subject_id ?? null,
         });
