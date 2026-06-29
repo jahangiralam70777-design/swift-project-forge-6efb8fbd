@@ -164,6 +164,7 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
     // Mock, Custom Exam), every attempt status, and repeated submissions because
     // each submitted answer row is its own timeline event.
     type TrendAnswerRow = {
+      mcq_id: string;
       is_correct: boolean;
       chosen_option: string | null;
       created_at: string | null;
@@ -174,11 +175,12 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
     };
     type TrendAnswer = { at: string; is_correct: boolean };
     const trendAnswers: TrendAnswer[] = [];
+    const practiceMcqIdsFromAttemptAnswers = new Set<string>();
     for (let from = 0; from < 50_000; from += 1000) {
       const { data: ans, error } = await supabase
         .from("attempt_answers")
         .select(
-          "is_correct,chosen_option,created_at,exam_attempts!inner(user_id,kind,status,created_at,completed_at)",
+          "mcq_id,is_correct,chosen_option,created_at,exam_attempts!inner(user_id,kind,status,created_at,completed_at)",
         )
         .eq("exam_attempts.user_id", userId)
         .not("chosen_option", "is", null)
@@ -190,9 +192,26 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
         if (!attempt) continue;
         const at = row.created_at ?? attempt.completed_at ?? attempt.created_at;
         if (!at) continue;
+        if (attempt.kind === "mcq_practice") practiceMcqIdsFromAttemptAnswers.add(row.mcq_id);
         trendAnswers.push({ at, is_correct: row.is_correct });
       }
       if (!ans || ans.length < 1000) break;
+    }
+    for (let from = 0; from < 50_000; from += 1000) {
+      const { data: practiceTrendRows, error } = await supabase
+        .from("mcq_practice_progress")
+        .select("mcq_id,is_correct,answered_at,attempt_count")
+        .eq("user_id", userId)
+        .range(from, from + 999);
+      if (error) throw error;
+      for (const row of practiceTrendRows ?? []) {
+        if (!row.answered_at || practiceMcqIdsFromAttemptAnswers.has(row.mcq_id)) continue;
+        const count = Math.max(1, Number(row.attempt_count ?? 1) || 1);
+        for (let i = 0; i < count; i++) {
+          trendAnswers.push({ at: row.answered_at, is_correct: row.is_correct });
+        }
+      }
+      if (!practiceTrendRows || practiceTrendRows.length < 1000) break;
     }
 
 
