@@ -407,13 +407,12 @@ export function McqFlow() {
   });
   const autoFinishKeyRef = useRef<string | null>(null);
   const forceFreshChapterRef = useRef<string | null>(null);
+  const pendingSnapshotAnswersRef = useRef<AnswerRec[] | null>(
+    hydrated ? (persisted!.allAnswers ?? null) : null,
+  );
   // Mark the chapter buffer as already-initialized when hydrating so the
   // auto-init effect doesn't wipe restored answers.
-  const initializedChapterRef = useRef<string | null>(
-    hydrated && persisted!.chapterId && (persisted!.allAnswers?.length ?? 0) > 0
-      ? persisted!.chapterId
-      : null,
-  );
+  const initializedChapterRef = useRef<string | null>(null);
 
 
 
@@ -585,9 +584,11 @@ export function McqFlow() {
     if (initializedChapterRef.current === chapterId && allAnswers.length === totalAll) return;
     initializedChapterRef.current = chapterId;
     const freshStart = forceFreshChapterRef.current === chapterId;
+    const snapshotAnswers = pendingSnapshotAnswersRef.current;
+    const savedProgressAnswers = buildAnswersFromSavedProgress(practiceAnswersQ.data ?? [], allMcqs);
     const restoredAnswers = freshStart
       ? new Array<AnswerRec>(totalAll).fill(undefined)
-      : buildAnswersFromSavedProgress(practiceAnswersQ.data ?? [], allMcqs);
+      : allMcqs.map((_, i) => savedProgressAnswers[i] ?? snapshotAnswers?.[i]);
     const resume = freshStart
       ? { absolute: 0, batchIndex: 0, current: 0 }
       : getNextUnansweredPosition(restoredAnswers, totalAll);
@@ -599,6 +600,7 @@ export function McqFlow() {
     setSavedAttemptId(null);
     setSessionStart(Date.now());
     forceFreshChapterRef.current = null;
+    pendingSnapshotAnswersRef.current = null;
     questionStartRef.current = Date.now();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapterId, mcqsQ.isSuccess, practiceAnswersQ.isSuccess, totalAll]);
@@ -773,6 +775,7 @@ export function McqFlow() {
     setChapterId(snap.chapterId);
     setChapterName(snap.chapterName);
     const restoredAnswers = snap.allAnswers ?? [];
+    pendingSnapshotAnswersRef.current = restoredAnswers;
     setAllAnswers(restoredAnswers);
     const resume = getNextUnansweredPosition(restoredAnswers, restoredAnswers.length);
     const resumeAbs = resume.absolute;
@@ -795,11 +798,7 @@ export function McqFlow() {
     setFinished(false);
     setReviewMode(!!snap.reviewMode);
     setSavedAttemptId(snap.savedAttemptId ?? null);
-    // Mark this chapter as already initialized so the auto-init effect
-    // does NOT wipe restored answers when MCQs load.
-    if (snap.chapterId && (snap.allAnswers?.length ?? 0) > 0) {
-      initializedChapterRef.current = snap.chapterId;
-    }
+    initializedChapterRef.current = null;
     forceFreshChapterRef.current = null;
     autoFinishKeyRef.current = null;
     questionStartRef.current = Date.now();
