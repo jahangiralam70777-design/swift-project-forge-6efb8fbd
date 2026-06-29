@@ -298,6 +298,7 @@ export const listSubjectProgress = createServerFn({ method: "POST" })
 
 // ---- Progress: chapters in a subject ----
 const chapterProgressSchema = z.object({ subjectId: z.string().uuid() });
+const chapterPracticeAnswersSchema = z.object({ chapterId: z.string().uuid() });
 
 export const listChapterProgress = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -349,7 +350,9 @@ export const listChapterProgress = createServerFn({ method: "POST" })
 
 export const listChapterPracticeAnswers = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((i: z.infer<typeof chapterProgressSchema>) => chapterProgressSchema.parse(i))
+  .inputValidator((i: z.infer<typeof chapterPracticeAnswersSchema>) =>
+    chapterPracticeAnswersSchema.parse(i),
+  )
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const rows: Array<{
@@ -369,7 +372,9 @@ export const listChapterPracticeAnswers = createServerFn({ method: "POST" })
       if (error) {
         if (isMissingPracticeProgressTable(error)) {
           await ensurePracticeProgressTable();
-          return listChapterPracticeAnswers({ data });
+          rows.length = 0;
+          from = -PAGE_SIZE;
+          continue;
         }
         throw error;
       }
