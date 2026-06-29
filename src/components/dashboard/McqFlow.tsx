@@ -406,6 +406,7 @@ export function McqFlow() {
     return Math.max(0, (persisted!.timeLeft || 0) - elapsedSec);
   });
   const autoFinishKeyRef = useRef<string | null>(null);
+  const forceFreshChapterRef = useRef<string | null>(null);
   // Mark the chapter buffer as already-initialized when hydrating so the
   // auto-init effect doesn't wipe restored answers.
   const initializedChapterRef = useRef<string | null>(
@@ -576,26 +577,31 @@ export function McqFlow() {
   const revealResults = reviewMode || finished || submittedNow;
   const picked: Choice | null = submittedNow ? (currentAnswer?.chosen ?? null) : selectedOption;
 
-  // Initialize the chapter-wide answer buffer once MCQs load for a chapter.
-  // Auto-resume into the next batch when the chapter has prior progress.
+  // Initialize the chapter-wide answer buffer once MCQs and saved progress load.
+  // Resume from the first actual unanswered MCQ based on saved answer rows, not
+  // just a local/batch index.
   useEffect(() => {
-    if (!chapterId || !mcqsQ.isSuccess) return;
+    if (!chapterId || !mcqsQ.isSuccess || !practiceAnswersQ.isSuccess) return;
     if (initializedChapterRef.current === chapterId && allAnswers.length === totalAll) return;
     initializedChapterRef.current = chapterId;
-    setAllAnswers(new Array(totalAll).fill(undefined));
-    const prog = chapterProgressMap.get(chapterId);
-    const completed = prog?.completed ?? 0;
-    const resumeBatch =
-      totalAll > 0 && completed > 0 && completed < totalAll
-        ? Math.min(Math.max(0, Math.max(0, Math.floor(completed / BATCH_SIZE))), Math.max(0, numBatches - 1))
-        : 0;
-    setBatchIndex(resumeBatch);
-    setCurrent(0);
+    const freshStart = forceFreshChapterRef.current === chapterId;
+    const restoredAnswers = freshStart
+      ? new Array<AnswerRec>(totalAll).fill(undefined)
+      : buildAnswersFromSavedProgress(practiceAnswersQ.data ?? [], allMcqs);
+    const resume = freshStart
+      ? { absolute: 0, batchIndex: 0, current: 0 }
+      : getNextUnansweredPosition(restoredAnswers, totalAll);
+
+    setAllAnswers(restoredAnswers);
+    setBatchIndex(Math.min(resume.batchIndex, Math.max(0, numBatches - 1)));
+    setCurrent(resume.current);
+    setSelectedOption(restoredAnswers[resume.absolute]?.chosen ?? null);
     setSavedAttemptId(null);
     setSessionStart(Date.now());
+    forceFreshChapterRef.current = null;
     questionStartRef.current = Date.now();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapterId, mcqsQ.isSuccess, totalAll]);
+  }, [chapterId, mcqsQ.isSuccess, practiceAnswersQ.isSuccess, totalAll]);
 
   // ── Persist MCQ Practice session to sessionStorage on relevant changes. ──
   useEffect(() => {
