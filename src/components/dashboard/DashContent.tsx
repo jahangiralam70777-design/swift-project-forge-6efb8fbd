@@ -121,6 +121,8 @@ export function DashContent() {
   const counts = data?.counts;
   const bars = data?.bars ?? [0, 0, 0, 0, 0, 0, 0];
   const barTotals = data?.barTotals ?? [0, 0, 0, 0, 0, 0, 0];
+  const todayAccuracy = data?.todayAccuracy ?? bars[6] ?? 0;
+  const todaySubmissionTotal = data?.todaySubmissionTotal ?? barTotals[6] ?? 0;
   const subjects = useMemo(() => {
     const list = data?.subjects ?? [];
     const palette = [
@@ -198,12 +200,12 @@ export function DashContent() {
   // accuracy day still renders as chart data instead of looking blank.
   const [accuracyRange, setAccuracyRange] = useState<"today" | "week">("week");
   const accuracyBars = useMemo(
-    () => (accuracyRange === "today" ? [bars[6] ?? 0] : bars),
-    [accuracyRange, bars],
+    () => (accuracyRange === "today" ? [todayAccuracy] : bars),
+    [accuracyRange, bars, todayAccuracy],
   );
   const accuracyTotals = useMemo(
-    () => (accuracyRange === "today" ? [barTotals[6] ?? 0] : barTotals),
-    [accuracyRange, barTotals],
+    () => (accuracyRange === "today" ? [todaySubmissionTotal] : barTotals),
+    [accuracyRange, barTotals, todaySubmissionTotal],
   );
   const accuracyLabels = useMemo(
     () => (accuracyRange === "today" ? ["Today"] : days),
