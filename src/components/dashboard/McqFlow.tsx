@@ -737,10 +737,29 @@ export function McqFlow() {
     setSubjectName(snap.subjectName ?? subjectName);
     setChapterId(snap.chapterId);
     setChapterName(snap.chapterName);
-    setAllAnswers(snap.allAnswers ?? []);
-    setCurrent(snap.current ?? 0);
-    setBatchIndex(snap.batchIndex ?? 0);
-    setSelectedOption(snap.selectedOption ?? null);
+    const restoredAnswers = snap.allAnswers ?? [];
+    setAllAnswers(restoredAnswers);
+    // Resume at the next UNANSWERED question rather than wherever the student
+    // last navigated. The persisted `current` reflects the last viewed index
+    // (often an already-submitted question if they closed on its explanation),
+    // so honoring it makes "Continue" feel like "starts from Question 1".
+    // Find the first falsy slot in the chapter-wide answer buffer; if every
+    // question is answered, fall back to the persisted index, then 0.
+    const firstUnanswered = restoredAnswers.findIndex((a) => !a);
+    const totalSnap = restoredAnswers.length;
+    const resumeAbs =
+      firstUnanswered >= 0
+        ? firstUnanswered
+        : Math.min(snap.current ?? 0, Math.max(0, totalSnap - 1));
+    const resumeBatchIndex =
+      totalSnap > 0 ? Math.floor(resumeAbs / BATCH_SIZE) : (snap.batchIndex ?? 0);
+    const resumeCurrent =
+      totalSnap > 0 ? resumeAbs - resumeBatchIndex * BATCH_SIZE : (snap.current ?? 0);
+    setCurrent(resumeCurrent);
+    setBatchIndex(resumeBatchIndex);
+    // selectedOption is only meaningful for the question being displayed; if
+    // the resume target is unanswered, ensure no stale selection is shown.
+    setSelectedOption(restoredAnswers[resumeAbs]?.chosen ?? null);
     setSessionStart(snap.sessionStart || Date.now());
     setSessionCount(snap.sessionCount ?? "all");
     setSessionTimerMin(snap.sessionTimerMin ?? 0);
