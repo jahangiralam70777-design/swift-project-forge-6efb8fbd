@@ -776,8 +776,8 @@ export function McqFlow() {
     setAllAnswers(restoredAnswers);
     const resume = getNextUnansweredPosition(restoredAnswers, restoredAnswers.length);
     const resumeAbs = resume.absolute;
-    setCurrent(resumeCurrent);
-    setBatchIndex(resumeBatchIndex);
+    setCurrent(resume.current);
+    setBatchIndex(resume.batchIndex);
     // selectedOption is only meaningful for the question being displayed; if
     // the resume target is unanswered, ensure no stale selection is shown.
     setSelectedOption(restoredAnswers[resumeAbs]?.chosen ?? null);
