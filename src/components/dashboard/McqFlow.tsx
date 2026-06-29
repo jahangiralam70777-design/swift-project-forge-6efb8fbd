@@ -588,7 +588,9 @@ export function McqFlow() {
     const savedProgressAnswers = buildAnswersFromSavedProgress(practiceAnswersQ.data ?? [], allMcqs);
     const restoredAnswers = freshStart
       ? new Array<AnswerRec>(totalAll).fill(undefined)
-      : allMcqs.map((_, i) => savedProgressAnswers[i] ?? snapshotAnswers?.[i]);
+      : snapshotAnswers?.some(Boolean)
+        ? allMcqs.map((_, i) => snapshotAnswers[i])
+        : savedProgressAnswers;
     const resume = freshStart
       ? { absolute: 0, batchIndex: 0, current: 0 }
       : getNextUnansweredPosition(restoredAnswers, totalAll);
@@ -815,6 +817,10 @@ export function McqFlow() {
       allAnswers.length > 0 &&
       allAnswers.some(Boolean)
     ) {
+      const resume = getNextUnansweredPosition(allAnswers, totalAll);
+      setBatchIndex(Math.min(resume.batchIndex, Math.max(0, numBatches - 1)));
+      setCurrent(resume.current);
+      setSelectedOption(allAnswers[resume.absolute]?.chosen ?? null);
       setStep(3);
       debugMcq("chapter resume (in-memory)", { chapterId: id });
       return;
@@ -824,12 +830,13 @@ export function McqFlow() {
       const snap = readMcqChapterResume(id);
       const cprog = chapterProgressMap.get(id);
       const isComplete = !!cprog && cprog.total > 0 && cprog.completed >= cprog.total;
+      const snapAnswers = snap?.allAnswers ?? [];
+      const snapHasUnanswered = snapAnswers.some(Boolean) && snapAnswers.some((a) => !a);
       if (
         snap &&
         !snap.finished &&
         !isComplete &&
-        (snap.allAnswers?.length ?? 0) > 0 &&
-        snap.allAnswers.some(Boolean)
+        snapHasUnanswered
       ) {
         setResumePrompt({ id, name, snapshot: snap });
         return;
