@@ -433,10 +433,13 @@ export function McqFlow() {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["subject-progress", level], refetchType: "active" }),
       qc.invalidateQueries({ queryKey: ["chapter-progress", subjectId], refetchType: "active" }),
+      chapterId
+        ? qc.invalidateQueries({ queryKey: ["chapter-practice-answers", chapterId] })
+        : Promise.resolve(),
       qc.invalidateQueries({ queryKey: ["student-performance-center"], refetchType: "active" }),
       qc.invalidateQueries({ queryKey: ["student-completion-tracker"], refetchType: "active" }),
     ]);
-  }, [level, qc, subjectId]);
+  }, [chapterId, level, qc, subjectId]);
 
   const levelsQ = useLevels({ includeLocked: true });
   const levelsList = levelsQ.data ?? [];
@@ -588,9 +591,7 @@ export function McqFlow() {
     const savedProgressAnswers = buildAnswersFromSavedProgress(practiceAnswersQ.data ?? [], allMcqs);
     const restoredAnswers = freshStart
       ? new Array<AnswerRec>(totalAll).fill(undefined)
-      : snapshotAnswers?.some(Boolean)
-        ? allMcqs.map((_, i) => snapshotAnswers[i])
-        : savedProgressAnswers;
+      : allMcqs.map((_, i) => savedProgressAnswers[i] ?? snapshotAnswers?.[i]);
     const resume = freshStart
       ? { absolute: 0, batchIndex: 0, current: 0 }
       : getNextUnansweredPosition(restoredAnswers, totalAll);
