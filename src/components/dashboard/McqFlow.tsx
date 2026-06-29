@@ -774,22 +774,8 @@ export function McqFlow() {
     setChapterName(snap.chapterName);
     const restoredAnswers = snap.allAnswers ?? [];
     setAllAnswers(restoredAnswers);
-    // Resume at the next UNANSWERED question rather than wherever the student
-    // last navigated. The persisted `current` reflects the last viewed index
-    // (often an already-submitted question if they closed on its explanation),
-    // so honoring it makes "Continue" feel like "starts from Question 1".
-    // Find the first falsy slot in the chapter-wide answer buffer; if every
-    // question is answered, fall back to the persisted index, then 0.
-    const firstUnanswered = restoredAnswers.findIndex((a) => !a);
-    const totalSnap = restoredAnswers.length;
-    const resumeAbs =
-      firstUnanswered >= 0
-        ? firstUnanswered
-        : Math.min(snap.current ?? 0, Math.max(0, totalSnap - 1));
-    const resumeBatchIndex =
-      totalSnap > 0 ? Math.floor(resumeAbs / BATCH_SIZE) : (snap.batchIndex ?? 0);
-    const resumeCurrent =
-      totalSnap > 0 ? resumeAbs - resumeBatchIndex * BATCH_SIZE : (snap.current ?? 0);
+    const resume = getNextUnansweredPosition(restoredAnswers, restoredAnswers.length);
+    const resumeAbs = resume.absolute;
     setCurrent(resumeCurrent);
     setBatchIndex(resumeBatchIndex);
     // selectedOption is only meaningful for the question being displayed; if
@@ -814,6 +800,7 @@ export function McqFlow() {
     if (snap.chapterId && (snap.allAnswers?.length ?? 0) > 0) {
       initializedChapterRef.current = snap.chapterId;
     }
+    forceFreshChapterRef.current = null;
     autoFinishKeyRef.current = null;
     questionStartRef.current = Date.now();
     setStep(3);
@@ -853,6 +840,7 @@ export function McqFlow() {
     // clear any persisted snapshot from a prior chapter first.
     clearMcqPersisted();
     clearMcqChapterResume(id);
+    forceFreshChapterRef.current = opts?.force ? id : null;
     setChapterId(id);
     setChapterName(name);
     setStep(3);
