@@ -194,6 +194,26 @@ function normalizeChoice(value: string | null | undefined): Choice | null {
     : null;
 }
 
+function getNextUnansweredPosition(answers: AnswerRec[], total: number) {
+  const safeTotal = Math.max(0, total || answers.length);
+  const firstUnanswered = Array.from({ length: safeTotal }).findIndex((_, i) => !answers[i]);
+  const absolute = firstUnanswered >= 0 ? firstUnanswered : Math.max(0, safeTotal - 1);
+  const batchIndex = safeTotal > 0 ? Math.floor(absolute / BATCH_SIZE) : 0;
+  return { absolute, batchIndex, current: absolute - batchIndex * BATCH_SIZE };
+}
+
+function buildAnswersFromSavedProgress(
+  savedAnswers: Array<{ mcq_id: string; chosen_option: string | null; time_spent_ms: number | null }>,
+  questions: Mcq[],
+) {
+  const savedByMcq = new Map(savedAnswers.map((a) => [a.mcq_id, a]));
+  return questions.map((m) => {
+    const saved = savedByMcq.get(m.id);
+    const chosen = normalizeChoice(saved?.chosen_option);
+    return chosen ? { chosen, timeMs: Math.max(0, saved?.time_spent_ms ?? 0) } : undefined;
+  });
+}
+
 function debugMcq(label: string, payload?: unknown) {
   console.debug(`[MCQ Practice] ${label}`, payload ?? "");
 }
