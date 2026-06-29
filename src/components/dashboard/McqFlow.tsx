@@ -47,6 +47,7 @@ import {
   listMcqs,
   listSubjectProgress,
   listChapterProgress,
+  listChapterPracticeAnswers,
   recordMcqPracticeProgress,
 } from "@/lib/learning.functions";
 import { useLevels } from "@/hooks/use-levels";
@@ -191,6 +192,26 @@ function normalizeChoice(value: string | null | undefined): Choice | null {
   return normalized === "A" || normalized === "B" || normalized === "C" || normalized === "D"
     ? normalized
     : null;
+}
+
+function getNextUnansweredPosition(answers: AnswerRec[], total: number) {
+  const safeTotal = Math.max(0, total || answers.length);
+  const firstUnanswered = Array.from({ length: safeTotal }).findIndex((_, i) => !answers[i]);
+  const absolute = firstUnanswered >= 0 ? firstUnanswered : Math.max(0, safeTotal - 1);
+  const batchIndex = safeTotal > 0 ? Math.floor(absolute / BATCH_SIZE) : 0;
+  return { absolute, batchIndex, current: absolute - batchIndex * BATCH_SIZE };
+}
+
+function buildAnswersFromSavedProgress(
+  savedAnswers: Array<{ mcq_id: string; chosen_option: string | null; time_spent_ms: number | null }>,
+  questions: Mcq[],
+) {
+  const savedByMcq = new Map(savedAnswers.map((a) => [a.mcq_id, a]));
+  return questions.map((m) => {
+    const saved = savedByMcq.get(m.id);
+    const chosen = normalizeChoice(saved?.chosen_option);
+    return chosen ? { chosen, timeMs: Math.max(0, saved?.time_spent_ms ?? 0) } : undefined;
+  });
 }
 
 function debugMcq(label: string, payload?: unknown) {
@@ -385,13 +406,13 @@ export function McqFlow() {
     return Math.max(0, (persisted!.timeLeft || 0) - elapsedSec);
   });
   const autoFinishKeyRef = useRef<string | null>(null);
+  const forceFreshChapterRef = useRef<string | null>(null);
+  const pendingSnapshotAnswersRef = useRef<AnswerRec[] | null>(
+    hydrated ? (persisted!.allAnswers ?? null) : null,
+  );
   // Mark the chapter buffer as already-initialized when hydrating so the
   // auto-init effect doesn't wipe restored answers.
-  const initializedChapterRef = useRef<string | null>(
-    hydrated && persisted!.chapterId && (persisted!.allAnswers?.length ?? 0) > 0
-      ? persisted!.chapterId
-      : null,
-  );
+  const initializedChapterRef = useRef<string | null>(null);
 
 
 
@@ -400,6 +421,7 @@ export function McqFlow() {
   const listMcqsFn = useServerFn(listMcqs);
   const listSubjectProgressFn = useServerFn(listSubjectProgress);
   const listChapterProgressFn = useServerFn(listChapterProgress);
+  const listChapterPracticeAnswersFn = useServerFn(listChapterPracticeAnswers);
   const recordPracticeProgressFn = useServerFn(recordMcqPracticeProgress);
   const saveAttemptFn = useServerFn(saveSessionAttempt);
   const toggleBookmarkFn = useServerFn(toggleMcqBookmark);
@@ -411,10 +433,13 @@ export function McqFlow() {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["subject-progress", level], refetchType: "active" }),
       qc.invalidateQueries({ queryKey: ["chapter-progress", subjectId], refetchType: "active" }),
+      chapterId
+        ? qc.invalidateQueries({ queryKey: ["chapter-practice-answers", chapterId] })
+        : Promise.resolve(),
       qc.invalidateQueries({ queryKey: ["student-performance-center"], refetchType: "active" }),
       qc.invalidateQueries({ queryKey: ["student-completion-tracker"], refetchType: "active" }),
     ]);
-  }, [level, qc, subjectId]);
+  }, [chapterId, level, qc, subjectId]);
 
   const levelsQ = useLevels({ includeLocked: true });
   const levelsList = levelsQ.data ?? [];
@@ -520,6 +545,13 @@ export function McqFlow() {
     queryFn: () => listMcqsFn({ data: { chapterId: chapterId!, limit: 2000 } }),
     enabled: !!chapterId && step === 3,
   });
+  const practiceAnswersQ = useQuery({
+    queryKey: ["chapter-practice-answers", chapterId],
+    queryFn: () => listChapterPracticeAnswersFn({ data: { chapterId: chapterId! } }),
+    enabled: !!chapterId && step === 3,
+    staleTime: 0,
+    refetchOnMount: true,
+  });
 
   // Full chapter (all MCQs), optionally truncated by session config.
   const rawMcqs = useMemo(() => (mcqsQ.data ?? []) as Mcq[], [mcqsQ.data]);
@@ -547,26 +579,34 @@ export function McqFlow() {
   const revealResults = reviewMode || finished || submittedNow;
   const picked: Choice | null = submittedNow ? (currentAnswer?.chosen ?? null) : selectedOption;
 
-  // Initialize the chapter-wide answer buffer once MCQs load for a chapter.
-  // Auto-resume into the next batch when the chapter has prior progress.
+  // Initialize the chapter-wide answer buffer once MCQs and saved progress load.
+  // Resume from the first actual unanswered MCQ based on saved answer rows, not
+  // just a local/batch index.
   useEffect(() => {
-    if (!chapterId || !mcqsQ.isSuccess) return;
+    if (!chapterId || !mcqsQ.isSuccess || !practiceAnswersQ.isSuccess) return;
     if (initializedChapterRef.current === chapterId && allAnswers.length === totalAll) return;
     initializedChapterRef.current = chapterId;
-    setAllAnswers(new Array(totalAll).fill(undefined));
-    const prog = chapterProgressMap.get(chapterId);
-    const completed = prog?.completed ?? 0;
-    const resumeBatch =
-      totalAll > 0 && completed > 0 && completed < totalAll
-        ? Math.min(Math.max(0, Math.max(0, Math.floor(completed / BATCH_SIZE))), Math.max(0, numBatches - 1))
-        : 0;
-    setBatchIndex(resumeBatch);
-    setCurrent(0);
+    const freshStart = forceFreshChapterRef.current === chapterId;
+    const snapshotAnswers = pendingSnapshotAnswersRef.current;
+    const savedProgressAnswers = buildAnswersFromSavedProgress(practiceAnswersQ.data ?? [], allMcqs);
+    const restoredAnswers = freshStart
+      ? new Array<AnswerRec>(totalAll).fill(undefined)
+      : allMcqs.map((_, i) => savedProgressAnswers[i] ?? snapshotAnswers?.[i]);
+    const resume = freshStart
+      ? { absolute: 0, batchIndex: 0, current: 0 }
+      : getNextUnansweredPosition(restoredAnswers, totalAll);
+
+    setAllAnswers(restoredAnswers);
+    setBatchIndex(Math.min(resume.batchIndex, Math.max(0, numBatches - 1)));
+    setCurrent(resume.current);
+    setSelectedOption(restoredAnswers[resume.absolute]?.chosen ?? null);
     setSavedAttemptId(null);
     setSessionStart(Date.now());
+    forceFreshChapterRef.current = null;
+    pendingSnapshotAnswersRef.current = null;
     questionStartRef.current = Date.now();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapterId, mcqsQ.isSuccess, totalAll]);
+  }, [chapterId, mcqsQ.isSuccess, practiceAnswersQ.isSuccess, totalAll]);
 
   // ── Persist MCQ Practice session to sessionStorage on relevant changes. ──
   useEffect(() => {
@@ -738,25 +778,12 @@ export function McqFlow() {
     setChapterId(snap.chapterId);
     setChapterName(snap.chapterName);
     const restoredAnswers = snap.allAnswers ?? [];
+    pendingSnapshotAnswersRef.current = restoredAnswers;
     setAllAnswers(restoredAnswers);
-    // Resume at the next UNANSWERED question rather than wherever the student
-    // last navigated. The persisted `current` reflects the last viewed index
-    // (often an already-submitted question if they closed on its explanation),
-    // so honoring it makes "Continue" feel like "starts from Question 1".
-    // Find the first falsy slot in the chapter-wide answer buffer; if every
-    // question is answered, fall back to the persisted index, then 0.
-    const firstUnanswered = restoredAnswers.findIndex((a) => !a);
-    const totalSnap = restoredAnswers.length;
-    const resumeAbs =
-      firstUnanswered >= 0
-        ? firstUnanswered
-        : Math.min(snap.current ?? 0, Math.max(0, totalSnap - 1));
-    const resumeBatchIndex =
-      totalSnap > 0 ? Math.floor(resumeAbs / BATCH_SIZE) : (snap.batchIndex ?? 0);
-    const resumeCurrent =
-      totalSnap > 0 ? resumeAbs - resumeBatchIndex * BATCH_SIZE : (snap.current ?? 0);
-    setCurrent(resumeCurrent);
-    setBatchIndex(resumeBatchIndex);
+    const resume = getNextUnansweredPosition(restoredAnswers, restoredAnswers.length);
+    const resumeAbs = resume.absolute;
+    setCurrent(resume.current);
+    setBatchIndex(resume.batchIndex);
     // selectedOption is only meaningful for the question being displayed; if
     // the resume target is unanswered, ensure no stale selection is shown.
     setSelectedOption(restoredAnswers[resumeAbs]?.chosen ?? null);
@@ -774,11 +801,8 @@ export function McqFlow() {
     setFinished(false);
     setReviewMode(!!snap.reviewMode);
     setSavedAttemptId(snap.savedAttemptId ?? null);
-    // Mark this chapter as already initialized so the auto-init effect
-    // does NOT wipe restored answers when MCQs load.
-    if (snap.chapterId && (snap.allAnswers?.length ?? 0) > 0) {
-      initializedChapterRef.current = snap.chapterId;
-    }
+    initializedChapterRef.current = null;
+    forceFreshChapterRef.current = null;
     autoFinishKeyRef.current = null;
     questionStartRef.current = Date.now();
     setStep(3);
@@ -794,6 +818,10 @@ export function McqFlow() {
       allAnswers.length > 0 &&
       allAnswers.some(Boolean)
     ) {
+      const resume = getNextUnansweredPosition(allAnswers, totalAll);
+      setBatchIndex(Math.min(resume.batchIndex, Math.max(0, numBatches - 1)));
+      setCurrent(resume.current);
+      setSelectedOption(allAnswers[resume.absolute]?.chosen ?? null);
       setStep(3);
       debugMcq("chapter resume (in-memory)", { chapterId: id });
       return;
@@ -803,12 +831,13 @@ export function McqFlow() {
       const snap = readMcqChapterResume(id);
       const cprog = chapterProgressMap.get(id);
       const isComplete = !!cprog && cprog.total > 0 && cprog.completed >= cprog.total;
+      const snapAnswers = snap?.allAnswers ?? [];
+      const snapHasUnanswered = snapAnswers.some(Boolean) && snapAnswers.some((a) => !a);
       if (
         snap &&
         !snap.finished &&
         !isComplete &&
-        (snap.allAnswers?.length ?? 0) > 0 &&
-        snap.allAnswers.some(Boolean)
+        snapHasUnanswered
       ) {
         setResumePrompt({ id, name, snapshot: snap });
         return;
@@ -818,6 +847,7 @@ export function McqFlow() {
     // clear any persisted snapshot from a prior chapter first.
     clearMcqPersisted();
     clearMcqChapterResume(id);
+    forceFreshChapterRef.current = opts?.force ? id : null;
     setChapterId(id);
     setChapterName(name);
     setStep(3);
@@ -2090,7 +2120,7 @@ export function McqFlow() {
                 <div className="pointer-events-none absolute -right-20 -top-20 h-60 w-60 rounded-full bg-[var(--neon-purple)]/25 blur-3xl" />
                 <div className="pointer-events-none absolute -left-20 -bottom-20 h-60 w-60 rounded-full bg-[var(--neon-blue)]/20 blur-3xl" />
 
-                {mcqsQ.isLoading ? (
+                {mcqsQ.isLoading || practiceAnswersQ.isLoading ? (
                   <LoadingBlock />
                 ) : total === 0 ? (
                   <EmptyState text="No questions published in this chapter yet." />

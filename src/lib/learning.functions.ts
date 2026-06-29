@@ -298,6 +298,7 @@ export const listSubjectProgress = createServerFn({ method: "POST" })
 
 // ---- Progress: chapters in a subject ----
 const chapterProgressSchema = z.object({ subjectId: z.string().uuid() });
+const chapterPracticeAnswersSchema = z.object({ chapterId: z.string().uuid() });
 
 export const listChapterProgress = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -345,6 +346,52 @@ export const listChapterProgress = createServerFn({ method: "POST" })
       const accuracy = completed ? Math.round((correct / completed) * 100) : 0;
       return { chapter_id: id, total, completed, percent, correct, accuracy };
     });
+  });
+
+export const listChapterPracticeAnswers = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i: z.infer<typeof chapterPracticeAnswersSchema>) =>
+    chapterPracticeAnswersSchema.parse(i),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const rows: Array<{
+      mcq_id: string;
+      chosen_option: string | null;
+      time_spent_ms: number | null;
+    }> = [];
+
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data: page, error } = await supabase
+        .from("mcq_practice_progress")
+        .select("mcq_id,chosen_option,time_spent_ms")
+        .eq("user_id", userId)
+        .eq("chapter_id", data.chapterId)
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        if (isMissingPracticeProgressTable(error)) {
+          await ensurePracticeProgressTable();
+          rows.length = 0;
+          from = -PAGE_SIZE;
+          continue;
+        }
+        throw error;
+      }
+
+      rows.push(...((page ?? []) as typeof rows));
+      if (!page || page.length < PAGE_SIZE) break;
+    }
+
+    return rows
+      .map((r) => ({
+        mcq_id: r.mcq_id,
+        chosen_option: normalizeChoice(r.chosen_option),
+        time_spent_ms: Math.max(0, Math.min(r.time_spent_ms ?? 0, 60 * 60 * 1000)),
+      }))
+      .filter((r): r is { mcq_id: string; chosen_option: "A" | "B" | "C" | "D"; time_spent_ms: number } =>
+        !!r.chosen_option,
+      );
   });
 
 const practiceProgressSchema = z.object({
