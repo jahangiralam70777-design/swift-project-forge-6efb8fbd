@@ -120,6 +120,9 @@ export function DashContent() {
 
   const counts = data?.counts;
   const bars = data?.bars ?? [0, 0, 0, 0, 0, 0, 0];
+  const barTotals = data?.barTotals ?? [0, 0, 0, 0, 0, 0, 0];
+  const todayAccuracy = data?.todayAccuracy ?? bars[6] ?? 0;
+  const todaySubmissionTotal = data?.todaySubmissionTotal ?? barTotals[6] ?? 0;
   const subjects = useMemo(() => {
     const list = data?.subjects ?? [];
     const palette = [
@@ -193,21 +196,24 @@ export function DashContent() {
   // `bars` from the server is 7 entries (oldest → today, index 6 = today),
   // each value already computed as (correct ÷ submitted) × 100 across MCQ
   // Practice + Quiz + Mock + Custom Exam submissions for that day. The
-  // empty-state gate MUST be derived from the same `bars` array that feeds
-  // the chart — using a different query (`adv.mcqCounts`) caused the empty
-  // state to render even when the snapshot had real accuracy data.
+  // empty-state gate uses the matching daily submission counts so a real 0%
+  // accuracy day still renders as chart data instead of looking blank.
   const [accuracyRange, setAccuracyRange] = useState<"today" | "week">("week");
   const accuracyBars = useMemo(
-    () => (accuracyRange === "today" ? [bars[6] ?? 0] : bars),
-    [accuracyRange, bars],
+    () => (accuracyRange === "today" ? [todayAccuracy] : bars),
+    [accuracyRange, bars, todayAccuracy],
+  );
+  const accuracyTotals = useMemo(
+    () => (accuracyRange === "today" ? [todaySubmissionTotal] : barTotals),
+    [accuracyRange, barTotals, todaySubmissionTotal],
   );
   const accuracyLabels = useMemo(
     () => (accuracyRange === "today" ? ["Today"] : days),
     [accuracyRange],
   );
   const accuracyHasData = useMemo(
-    () => accuracyBars.some((v) => (v ?? 0) > 0),
-    [accuracyBars],
+    () => accuracyTotals.some((v) => (v ?? 0) > 0),
+    [accuracyTotals],
   );
 
 

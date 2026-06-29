@@ -158,32 +158,60 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       });
     }
 
-    // Accuracy Trend extension: also include answers submitted to in-progress
-    // attempts (Quiz / Mock / Custom Exam not yet finished) so the trend bars
-    // update as soon as a student submits a single question. This data is
-    // ONLY used to compute `bars` below — it must NOT leak into totals,
-    // subject aggregates, recent activity, or any other widget.
+    // Accuracy Trend data source: build the chart directly from underlying
+    // submitted answer rows, not from summary cards or completed-at attempt
+    // aggregates. This intentionally includes every kind (MCQ Practice, Quiz,
+    // Mock, Custom Exam), every attempt status, and repeated submissions because
+    // each submitted answer row is its own timeline event.
+    type TrendAnswerRow = {
+      mcq_id: string;
+      is_correct: boolean;
+      chosen_option: string | null;
+      created_at: string | null;
+      exam_attempts:
+        | { user_id: string; kind: string; status: string; created_at: string | null; completed_at: string | null }
+        | Array<{ user_id: string; kind: string; status: string; created_at: string | null; completed_at: string | null }>
+        | null;
+    };
     type TrendAnswer = { at: string; is_correct: boolean };
-    const trendAnswers: TrendAnswer[] = submittedAnswers.map((a) => ({
-      at: a.at,
-      is_correct: a.is_correct,
-    }));
-    const inProgressNonPracticeIds = attempts
-      .filter((a) => a.status !== "completed" && a.kind !== "mcq_practice")
-      .map((a) => a.id);
-    for (let i = 0; i < inProgressNonPracticeIds.length; i += 200) {
-      const ids = inProgressNonPracticeIds.slice(i, i + 200);
-      if (!ids.length) continue;
+    const trendAnswers: TrendAnswer[] = [];
+    const practiceMcqIdsFromAttemptAnswers = new Set<string>();
+    for (let from = 0; from < 50_000; from += 1000) {
       const { data: ans, error } = await supabase
         .from("attempt_answers")
-        .select("is_correct,chosen_option,created_at")
-        .in("attempt_id", ids)
-        .not("chosen_option", "is", null);
+        .select(
+          "mcq_id,is_correct,chosen_option,created_at,exam_attempts!inner(user_id,kind,status,created_at,completed_at)",
+        )
+        .eq("exam_attempts.user_id", userId)
+        .not("chosen_option", "is", null)
+        .range(from, from + 999);
       if (error) throw error;
-      for (const row of ans ?? []) {
-        if (!row.created_at) continue;
-        trendAnswers.push({ at: row.created_at, is_correct: row.is_correct });
+      for (const row of (ans ?? []) as unknown as TrendAnswerRow[]) {
+        if (!row.chosen_option) continue;
+        const attempt = Array.isArray(row.exam_attempts) ? row.exam_attempts[0] : row.exam_attempts;
+        if (!attempt) continue;
+        const at = row.created_at ?? attempt.completed_at ?? attempt.created_at;
+        if (!at) continue;
+        if (attempt.kind === "mcq_practice") practiceMcqIdsFromAttemptAnswers.add(row.mcq_id);
+        trendAnswers.push({ at, is_correct: row.is_correct });
       }
+      if (!ans || ans.length < 1000) break;
+    }
+    for (let from = 0; from < 50_000; from += 1000) {
+      const { data: practiceTrendRows, error } = await supabase
+        .from("mcq_practice_progress")
+        .select("mcq_id,is_correct,answered_at,attempt_count")
+        .eq("user_id", userId)
+        .range(from, from + 999);
+      if (error) throw error;
+      for (const row of practiceTrendRows ?? []) {
+        if (!row.answered_at || practiceMcqIdsFromAttemptAnswers.has(row.mcq_id)) continue;
+        const count = Math.max(1, Number(row.attempt_count ?? 1) || 1);
+        for (let i = 0; i < count; i++) {
+          trendAnswers.push({ at: row.answered_at, is_correct: row.is_correct });
+        }
+      }
+      if (!practiceTrendRows || practiceTrendRows.length < 1000) break;
     }
 
 
@@ -216,17 +244,38 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       cursor.setUTCDate(cursor.getUTCDate() - 1);
     }
 
-    // Weekly bars (Mon..Sun accuracy of attempts that day, 0 if none)
+    // Weekly bars (7 daily accuracy buckets). Prefer the current 7-day window;
+    // if that has no submissions but the student has older submissions, anchor
+    // the same 7-bar chart to their latest submission day so historical users
+    // do not see a blank trend despite having real answer history.
     const today = new Date();
-    const bars: number[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
-      d.setUTCDate(today.getUTCDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      const day = trendAnswers.filter((a) => (a.at ?? "").slice(0, 10) === key);
-      const t = day.length;
-      const c = day.filter((a) => a.is_correct).length;
-      bars.push(t ? Math.round((c / t) * 100) : 0);
+    const buildAccuracyBuckets = (anchor: Date) => {
+      const nextBars: number[] = [];
+      const nextTotals: number[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(anchor);
+        d.setUTCDate(anchor.getUTCDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        const day = trendAnswers.filter((a) => (a.at ?? "").slice(0, 10) === key);
+        const t = day.length;
+        const c = day.filter((a) => a.is_correct).length;
+        nextBars.push(t ? Math.round((c / t) * 100) : 0);
+        nextTotals.push(t);
+      }
+      return { bars: nextBars, barTotals: nextTotals };
+    };
+    const currentBuckets = buildAccuracyBuckets(today);
+    let bars = currentBuckets.bars;
+    let barTotals = currentBuckets.barTotals;
+    const todayAccuracy = bars[6] ?? 0;
+    const todaySubmissionTotal = barTotals[6] ?? 0;
+    if (!barTotals.some((t) => t > 0) && trendAnswers.length) {
+      const latest = trendAnswers.reduce((max, a) => Math.max(max, new Date(a.at).getTime()), 0);
+      if (latest > 0) {
+        const latestBuckets = buildAccuracyBuckets(new Date(latest));
+        bars = latestBuckets.bars;
+        barTotals = latestBuckets.barTotals;
+      }
     }
 
     // Continue learning: latest unique quizzes the user attempted but didn't finish 100%
@@ -317,6 +366,9 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       accuracy,
       streak,
       bars,
+      barTotals,
+      todayAccuracy,
+      todaySubmissionTotal,
       subjects: subjectsList,
       learning,
       recommendations,
