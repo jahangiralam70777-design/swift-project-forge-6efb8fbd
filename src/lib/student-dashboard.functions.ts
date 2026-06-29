@@ -223,7 +223,7 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       const d = new Date(today);
       d.setUTCDate(today.getUTCDate() - i);
       const key = d.toISOString().slice(0, 10);
-      const day = submittedAnswers.filter((a) => a.at.slice(0, 10) === key);
+      const day = trendAnswers.filter((a) => (a.at ?? "").slice(0, 10) === key);
       const t = day.length;
       const c = day.filter((a) => a.is_correct).length;
       bars.push(t ? Math.round((c / t) * 100) : 0);
