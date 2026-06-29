@@ -2119,7 +2119,7 @@ export function McqFlow() {
                 <div className="pointer-events-none absolute -right-20 -top-20 h-60 w-60 rounded-full bg-[var(--neon-purple)]/25 blur-3xl" />
                 <div className="pointer-events-none absolute -left-20 -bottom-20 h-60 w-60 rounded-full bg-[var(--neon-blue)]/20 blur-3xl" />
 
-                {mcqsQ.isLoading ? (
+                {mcqsQ.isLoading || practiceAnswersQ.isLoading ? (
                   <LoadingBlock />
                 ) : total === 0 ? (
                   <EmptyState text="No questions published in this chapter yet." />
