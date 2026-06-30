@@ -611,6 +611,10 @@ function ExamStage({
     onSuccess: (res) => {
       // Drop the local draft now that the attempt is persisted server-side.
       clearAnswers(draftKey);
+      qc.invalidateQueries({ queryKey: ["student-dashboard-snapshot"], refetchType: "all" });
+      qc.invalidateQueries({ queryKey: ["student-advanced-analytics"], refetchType: "all" });
+      qc.invalidateQueries({ queryKey: ["student-performance-center"] });
+      qc.invalidateQueries({ queryKey: ["student-completion-tracker"] });
       qc.invalidateQueries({ queryKey: ["my-mock-attempts", mock.id] });
       qc.invalidateQueries({ queryKey: ["mock-leaderboard", mock.id] });
       onSubmit({

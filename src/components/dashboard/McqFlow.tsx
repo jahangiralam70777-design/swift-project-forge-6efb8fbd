@@ -436,6 +436,8 @@ export function McqFlow() {
       chapterId
         ? qc.invalidateQueries({ queryKey: ["chapter-practice-answers", chapterId] })
         : Promise.resolve(),
+      qc.invalidateQueries({ queryKey: ["student-dashboard-snapshot"], refetchType: "all" }),
+      qc.invalidateQueries({ queryKey: ["student-advanced-analytics"], refetchType: "all" }),
       qc.invalidateQueries({ queryKey: ["student-performance-center"], refetchType: "active" }),
       qc.invalidateQueries({ queryKey: ["student-completion-tracker"], refetchType: "active" }),
     ]);

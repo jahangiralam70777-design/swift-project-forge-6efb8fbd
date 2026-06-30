@@ -235,7 +235,8 @@ export function QuizFlow() {
       setAttemptId((r as { attemptId?: string }).attemptId ?? null);
       // Clear the saved draft now that the attempt is recorded server-side.
       if (quizId) clearAnswers(`quiz:${quizId}`);
-      qc.invalidateQueries({ queryKey: ["student-dashboard-snapshot"] });
+      qc.invalidateQueries({ queryKey: ["student-dashboard-snapshot"], refetchType: "all" });
+      qc.invalidateQueries({ queryKey: ["student-advanced-analytics"], refetchType: "all" });
       qc.invalidateQueries({ queryKey: ["student-performance-center"] });
       qc.invalidateQueries({ queryKey: ["student-completion-tracker"] });
       qc.invalidateQueries({ queryKey: ["my-attempts"] });
