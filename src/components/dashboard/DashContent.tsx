@@ -359,7 +359,7 @@ export function DashContent() {
         <div className="glass shadow-card-soft rounded-3xl p-5 lg:col-span-2">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="font-display text-lg font-bold">Accuracy Trend</h3>
+              <h3 className="font-display text-lg font-bold">Accuracy Over Time</h3>
               <p className="text-xs text-muted-foreground">
                 {accuracyRange === "today"
                   ? "Today · live from your submitted MCQs"
