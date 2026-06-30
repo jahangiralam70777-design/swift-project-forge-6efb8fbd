@@ -104,7 +104,7 @@ export function DashContent() {
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
+    refetchOnMount: true,
   });
 
   // Dedupes with AdvancedAnalyticsSection's query — gives us real MCQ counts + goals.
