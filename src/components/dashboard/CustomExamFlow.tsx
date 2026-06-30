@@ -286,6 +286,10 @@ export function CustomExamFlow() {
       // in the same render pass as the state flip.
       setResult(r);
       setSubmitted(true);
+      qc.invalidateQueries({ queryKey: ["student-dashboard-snapshot"], refetchType: "all" });
+      qc.invalidateQueries({ queryKey: ["student-advanced-analytics"], refetchType: "all" });
+      qc.invalidateQueries({ queryKey: ["student-performance-center"] });
+      qc.invalidateQueries({ queryKey: ["student-completion-tracker"] });
       // Scroll to top so the result panel is visible immediately.
       if (typeof window !== "undefined") {
         window.scrollTo({ top: 0, behavior: "smooth" });

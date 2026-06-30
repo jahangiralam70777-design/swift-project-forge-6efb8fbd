@@ -104,7 +104,7 @@ export function DashContent() {
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
+    refetchOnMount: "always",
   });
 
   // Dedupes with AdvancedAnalyticsSection's query — gives us real MCQ counts + goals.
@@ -121,6 +121,9 @@ export function DashContent() {
   const counts = data?.counts;
   const bars = data?.bars ?? [0, 0, 0, 0, 0, 0, 0];
   const barTotals = data?.barTotals ?? [0, 0, 0, 0, 0, 0, 0];
+  const monthBars = data?.monthBars ?? [];
+  const monthBarTotals = data?.monthBarTotals ?? [];
+  const monthLabels = data?.monthLabels ?? [];
   const todayAccuracy = data?.todayAccuracy ?? bars[6] ?? 0;
   const todaySubmissionTotal = data?.todaySubmissionTotal ?? barTotals[6] ?? 0;
   const subjects = useMemo(() => {
@@ -198,18 +201,23 @@ export function DashContent() {
   // Practice + Quiz + Mock + Custom Exam submissions for that day. The
   // empty-state gate uses the matching daily submission counts so a real 0%
   // accuracy day still renders as chart data instead of looking blank.
-  const [accuracyRange, setAccuracyRange] = useState<"today" | "week">("week");
+  const [accuracyRange, setAccuracyRange] = useState<"today" | "week" | "month">("week");
   const accuracyBars = useMemo(
-    () => (accuracyRange === "today" ? [todayAccuracy] : bars),
-    [accuracyRange, bars, todayAccuracy],
+    () => (accuracyRange === "today" ? [todayAccuracy] : accuracyRange === "month" ? monthBars : bars),
+    [accuracyRange, bars, monthBars, todayAccuracy],
   );
   const accuracyTotals = useMemo(
-    () => (accuracyRange === "today" ? [todaySubmissionTotal] : barTotals),
-    [accuracyRange, barTotals, todaySubmissionTotal],
+    () =>
+      accuracyRange === "today"
+        ? [todaySubmissionTotal]
+        : accuracyRange === "month"
+          ? monthBarTotals
+          : barTotals,
+    [accuracyRange, barTotals, monthBarTotals, todaySubmissionTotal],
   );
   const accuracyLabels = useMemo(
-    () => (accuracyRange === "today" ? ["Today"] : days),
-    [accuracyRange],
+    () => (accuracyRange === "today" ? ["Today"] : accuracyRange === "month" ? monthLabels : days),
+    [accuracyRange, monthLabels],
   );
   const accuracyHasData = useMemo(
     () => accuracyTotals.some((v) => (v ?? 0) > 0),
@@ -363,6 +371,8 @@ export function DashContent() {
               <p className="text-xs text-muted-foreground">
                 {accuracyRange === "today"
                   ? "Today · live from your submitted MCQs"
+                  : accuracyRange === "month"
+                    ? "Last 30 days · live from your submitted MCQs"
                   : "Last 7 days · live from your submitted MCQs"}
               </p>
             </div>
@@ -375,6 +385,7 @@ export function DashContent() {
                 [
                   { k: "today" as const, label: "Today" },
                   { k: "week" as const, label: "This Week" },
+                  { k: "month" as const, label: "Month" },
                 ]
               ).map((opt) => {
                 const active = accuracyRange === opt.k;
@@ -420,7 +431,9 @@ export function DashContent() {
             <div className="mt-6 flex h-56 items-center justify-center rounded-2xl border border-dashed border-border/60 px-4 text-center text-xs text-muted-foreground">
               {accuracyRange === "today"
                 ? "Submit some MCQs today to see your accuracy."
-                : "Submit some MCQs this week to see your accuracy trend."}
+                : accuracyRange === "month"
+                  ? "Submit some MCQs this month to see your accuracy."
+                  : "Submit some MCQs this week to see your accuracy trend."}
             </div>
           )}
         </div>
