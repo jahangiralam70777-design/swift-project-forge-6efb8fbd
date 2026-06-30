@@ -264,9 +264,27 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       }
       return { bars: nextBars, barTotals: nextTotals };
     };
+    const buildAccuracyBucketsForDays = (anchor: Date, daysCount: number) => {
+      const nextBars: number[] = [];
+      const nextTotals: number[] = [];
+      const nextLabels: string[] = [];
+      for (let i = daysCount - 1; i >= 0; i--) {
+        const d = new Date(anchor);
+        d.setUTCDate(anchor.getUTCDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        const day = trendAnswers.filter((a) => (a.at ?? "").slice(0, 10) === key);
+        const t = day.length;
+        const c = day.filter((a) => a.is_correct).length;
+        nextBars.push(t ? Math.round((c / t) * 100) : 0);
+        nextTotals.push(t);
+        nextLabels.push(String(d.getUTCDate()));
+      }
+      return { bars: nextBars, barTotals: nextTotals, labels: nextLabels };
+    };
     const currentBuckets = buildAccuracyBuckets(today);
     let bars = currentBuckets.bars;
     let barTotals = currentBuckets.barTotals;
+    let monthBuckets = buildAccuracyBucketsForDays(today, 30);
     const todayAccuracy = bars[6] ?? 0;
     const todaySubmissionTotal = barTotals[6] ?? 0;
     if (!barTotals.some((t) => t > 0) && trendAnswers.length) {
@@ -276,6 +294,10 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
         bars = latestBuckets.bars;
         barTotals = latestBuckets.barTotals;
       }
+    }
+    if (!monthBuckets.barTotals.some((t) => t > 0) && trendAnswers.length) {
+      const latest = trendAnswers.reduce((max, a) => Math.max(max, new Date(a.at).getTime()), 0);
+      if (latest > 0) monthBuckets = buildAccuracyBucketsForDays(new Date(latest), 30);
     }
 
     // Continue learning: latest unique quizzes the user attempted but didn't finish 100%
@@ -367,6 +389,9 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       streak,
       bars,
       barTotals,
+      monthBars: monthBuckets.bars,
+      monthBarTotals: monthBuckets.barTotals,
+      monthLabels: monthBuckets.labels,
       todayAccuracy,
       todaySubmissionTotal,
       subjects: subjectsList,
